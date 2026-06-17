@@ -7,8 +7,6 @@ import com.google.gson.Gson
 import com.google.gson.GsonBuilder
 import java.io.File
 
-// ─── Data Model ──────────────────────────────────────────────────────────────
-
 enum class ModType { REQUEST, RESPONSE, HEADER }
 enum class ModRuleAction { SET, DELETE }
 
@@ -24,11 +22,10 @@ data class ModFile(
     val enabled: Boolean = true,
     val type: String = ModType.RESPONSE.name,
     val rules: List<ModRule> = emptyList(),
-    val rawContent: String = "",   // raw JSON override (legacy support + advanced editing)
+    val rawContent: String = "",
     val createdAt: Long = 0L,
     val version: Int = 2
 ) {
-    /** Build the override map from rules, or fall back to rawContent */
     fun buildOverrideMap(): Map<Int, String> {
         if (rules.isNotEmpty()) {
             val result = mutableMapOf<Int, String>()
@@ -50,8 +47,6 @@ data class ModFile(
 
     fun toJsonString(): String = GSON.toJson(this)
 }
-
-// ─── Manager ─────────────────────────────────────────────────────────────────
 
 object ModManager {
     private const val TAG = "ModManager"
@@ -75,7 +70,10 @@ object ModManager {
             file.writeText(GSON.toJson(mod), Charsets.UTF_8)
             Log.i(TAG, "Saved: ${file.absolutePath}")
             true
-        } catch (e: Exception) { Log.e(TAG, "saveMod failed: ${e.message}"); false }
+        } catch (e: Exception) {
+            Log.e(TAG, "saveMod failed: ${e.message}")
+            false
+        }
     }
 
     fun saveModFromContent(
@@ -100,11 +98,17 @@ object ModManager {
                         val t = f.readText(Charsets.UTF_8)
                         if (t.isBlank()) null
                         else GSON.fromJson(t, ModFile::class.java)
-                    } catch (e: Exception) { Log.w(TAG, "Skip ${f.name}: ${e.message}"); null }
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Skip ${f.name}: ${e.message}")
+                        null
+                    }
                 }
                 ?.sortedByDescending { it.createdAt }
                 ?: emptyList()
-        } catch (e: Exception) { Log.e(TAG, "loadMods: ${e.message}"); emptyList() }
+        } catch (e: Exception) {
+            Log.e(TAG, "loadMods: ${e.message}")
+            emptyList()
+        }
     }
 
     fun deleteMod(context: Context, name: String): Boolean {
@@ -120,7 +124,10 @@ object ModManager {
             val mod = GSON.fromJson(file.readText(Charsets.UTF_8), ModFile::class.java)
             file.writeText(GSON.toJson(mod.copy(enabled = enabled)), Charsets.UTF_8)
             true
-        } catch (e: Exception) { Log.e(TAG, "setEnabled: ${e.message}"); false }
+        } catch (e: Exception) {
+            Log.e(TAG, "setEnabled: ${e.message}")
+            false
+        }
     }
 
     fun exportMod(context: Context, mod: ModFile): File? {
@@ -131,7 +138,10 @@ object ModManager {
             val out = File(dir, "${mod.name.sanitize()}.json")
             out.writeText(GSON.toJson(mod), Charsets.UTF_8)
             out
-        } catch (e: Exception) { Log.e(TAG, "exportMod: ${e.message}"); null }
+        } catch (e: Exception) {
+            Log.e(TAG, "exportMod: ${e.message}")
+            null
+        }
     }
 
     fun importMod(context: Context, uri: Uri): ModFile? {
@@ -141,10 +151,11 @@ object ModManager {
             val mod = GSON.fromJson(text.trim(), ModFile::class.java) ?: return null
             saveMod(context, mod)
             mod
-        } catch (e: Exception) { Log.e(TAG, "importMod: ${e.message}"); null }
+        } catch (e: Exception) {
+            Log.e(TAG, "importMod: ${e.message}")
+            null
+        }
     }
-
-    private val GSON_LOCAL: Gson get() = GSON
 }
 
 private val GSON = GsonBuilder().setPrettyPrinting().create()
