@@ -7,6 +7,7 @@ import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.google.gson.Gson
+import com.google.gson.GsonBuilder
 import com.nexbytes.h7skertool.model.CapturedRequest
 import com.nexbytes.h7skertool.model.CapturedResponse
 import com.nexbytes.h7skertool.model.LogEntry
@@ -93,7 +94,9 @@ class CaptureViewModel(app: Application) : AndroidViewModel(app) {
         _state.update { it.copy(shizukuPermissionGranted = result == PackageManager.PERMISSION_GRANTED) }
     }
     private var callbacksRegistered = false
-    private val gson = Gson()
+    private val gson = GsonBuilder()
+        .setLenient()
+        .create()
 
     init {
         observeSession()
@@ -124,7 +127,6 @@ class CaptureViewModel(app: Application) : AndroidViewModel(app) {
                             reqs = listOf(req) + reqs
                             resps[req.id] = res
                         }
-                        // Keep only last 1000 entries
                         val entries = resps.entries.toList()
                         val limited = if (entries.size > 1000) {
                             entries.takeLast(1000).associate { it.toPair() }
@@ -241,11 +243,11 @@ class CaptureViewModel(app: Application) : AndroidViewModel(app) {
     fun setSearch(q: String) { _state.update { it.copy(searchQuery = q) } }
     fun setEndpointFilter(ep: String?) { _state.update { it.copy(endpointFilter = ep) } }
 
-    // ── Helper: Extract only changed fields ──────────────────────────────────
+    // ── Helper: Extract ONLY changed fields ──────────────────────────────────
 
     /**
      * Extract only the fields that changed between original and modified response.
-     * Returns a map with only the changed fields.
+     * Converts numbers properly (no scientific notation, no .0)
      */
     private fun getChangedFields(original: String, modified: String): Map<String, Any> {
         return try {
@@ -255,19 +257,42 @@ class CaptureViewModel(app: Application) : AndroidViewModel(app) {
             val changed = mutableMapOf<String, Any>()
             for ((key, value) in modifiedMap) {
                 if (originalMap[key] != value) {
-                    changed[key] = value
+                    // ✅ Clean the value - convert numbers to proper format
+                    val cleanedValue = cleanValue(value)
+                    changed[key] = cleanedValue
                 }
             }
             Log.d(TAG, "Changed fields: ${changed.keys}")
             changed
         } catch (e: Exception) {
             Log.e(TAG, "getChangedFields error: ${e.message}")
-            // If can't parse, save all fields
-            try {
-                gson.fromJson(modified, Map::class.java) as Map<String, Any>
-            } catch (_: Exception) {
-                emptyMap()
+            emptyMap()
+        }
+    }
+
+    /**
+     * Clean value: Convert Double to Long if it's a whole number
+     */
+    private fun cleanValue(value: Any): Any {
+        return when (value) {
+            is Double -> {
+                if (value % 1.0 == 0.0) {
+                    value.toLong()  // 1.0 → 1, 9999999999.0 → 9999999999
+                } else {
+                    value
+                }
             }
+            is Map<*, *> -> {
+                val cleaned = mutableMapOf<String, Any>()
+                for ((k, v) in value) {
+                    cleaned[k.toString()] = cleanValue(v ?: continue)
+                }
+                cleaned
+            }
+            is List<*> -> {
+                value.map { cleanValue(it ?: continue) }
+            }
+            else -> value
         }
     }
 
@@ -283,8 +308,7 @@ class CaptureViewModel(app: Application) : AndroidViewModel(app) {
     // ── Mod management ────────────────────────────────────────────────────────
 
     /**
-     * Save a modification from the RequestDetailScreen.
-     * ONLY changed fields are saved, not the entire response.
+     * Save a modification - ONLY changed fields are saved!
      */
     fun saveModification(endpoint: String, body: String, section: String = "response") {
         viewModelScope.launch {
@@ -303,9 +327,10 @@ class CaptureViewModel(app: Application) : AndroidViewModel(app) {
             val changedFields = if (originalBody != null && section == "response") {
                 getChangedFields(originalBody, body)
             } else {
-                // For headers/request, save the whole thing (or parse differently)
+                // For headers/request, save as-is
                 try {
-                    gson.fromJson(body, Map::class.java) as Map<String, Any>
+                    val map = gson.fromJson(body, Map::class.java) as Map<String, Any>
+                    map.mapValues { cleanValue(it.value) }
                 } catch (_: Exception) {
                     mapOf("_raw" to body)
                 }
@@ -325,7 +350,7 @@ class CaptureViewModel(app: Application) : AndroidViewModel(app) {
                 else       -> ModType.RESPONSE
             }
             
-            // ✅ Save ONLY changed fields as rawContent
+            // ✅ Save ONLY changed fields
             val modContent = gson.toJson(changedFields)
             
             withContext(Dispatchers.IO) {
@@ -333,7 +358,7 @@ class CaptureViewModel(app: Application) : AndroidViewModel(app) {
                     getApplication(), 
                     modName, 
                     endpoint, 
-                    modContent,  // ← ONLY changed fields!
+                    modContent,
                     modType
                 )
                 refreshModFiles()
