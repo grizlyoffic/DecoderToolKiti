@@ -18,7 +18,7 @@ object ProtoModifier {
 
     fun encodeVarint(value: Long): ByteArray {
         val out = mutableListOf<Byte>()
-        var v = value and 0xFFFFFFFFFFFFFFFFL.toLong()
+        var v = value and 0x7FFFFFFFFFFFFFFF // Use Long.MAX_VALUE instead of -1
         while (v > 127L) {
             out.add(((v and 0x7F) or 0x80).toByte())
             v = v ushr 7
