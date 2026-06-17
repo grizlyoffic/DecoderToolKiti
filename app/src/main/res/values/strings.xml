@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">H7skER TOOL</string>
+    <string name="notif_channel_name">H7skER Capture</string>
+    <string name="notif_channel_desc">Active proxy capture service</string>
+    <string name="capture_active">Capturing active</string>
+    <string name="capture_stopped">Capture stopped</string>
+    <string name="proxy_started">Proxy server started</string>
+    <string name="proxy_error">Proxy error</string>
+    <string name="shizuku_required">Shizuku Required</string>
+    <string name="auth_required">Authorization Required</string>
+    <string name="client_url">Client Server URL</string>
+    <string name="settings">Settings</string>
+    <string name="version">Version 2.0</string>
+</resources>

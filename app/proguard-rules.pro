@@ -1,0 +1,20 @@
+-keep class com.nexbytes.h7skertool.** { *; }
+-keep interface rikka.shizuku.** { *; }
+-keep class rikka.shizuku.** { *; }
+-keep class okhttp3.** { *; }
+-dontwarn okhttp3.**
+-dontwarn okio.**
+-keep class okio.** { *; }
+-keep class fi.iki.elonen.** { *; }
+-keepattributes Signature,*Annotation*
+-keep class com.google.gson.** { *; }
+-dontwarn com.google.gson.**
+-keep class kotlin.coroutines.** { *; }
+-dontwarn kotlin.**
+-keep class androidx.compose.** { *; }
+-dontwarn androidx.compose.**
+-keepclassmembers enum * { *; }
+-assumenosideeffects class android.util.Log { public static *** d(...); public static *** v(...); }
+-optimizationpasses 5
+-allowaccessmodification
+-repackageclasses 'h'

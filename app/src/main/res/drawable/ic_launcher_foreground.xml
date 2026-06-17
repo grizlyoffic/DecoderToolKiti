@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Outer glow ring -->
+    <path
+        android:fillColor="#1A00FF9D"
+        android:pathData="M54,12 A42,42 0 1,0 54,96 A42,42 0 1,0 54,12 Z" />
+    <!-- Inner ring -->
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#00FF9D"
+        android:strokeWidth="2"
+        android:pathData="M54,18 A36,36 0 1,0 54,90 A36,36 0 1,0 54,18 Z" />
+    <!-- H letter -->
+    <path
+        android:fillColor="#00FF9D"
+        android:pathData="M34,34 L34,74 L42,74 L42,57 L66,57 L66,74 L74,74 L74,34 L66,34 L66,50 L42,50 L42,34 Z" />
+    <!-- Small circuit dots -->
+    <path android:fillColor="#00D4FF" android:pathData="M24,54 A3,3 0 1,0 30,54 A3,3 0 1,0 24,54 Z"/>
+    <path android:fillColor="#00D4FF" android:pathData="M78,54 A3,3 0 1,0 84,54 A3,3 0 1,0 78,54 Z"/>
+    <path android:fillColor="#00FF9D" android:pathData="M54,20 A3,3 0 1,0 60,20 A3,3 0 1,0 54,20 Z"/>
+    <path android:fillColor="#00FF9D" android:pathData="M54,85 A3,3 0 1,0 60,85 A3,3 0 1,0 54,85 Z"/>
+    <!-- Circuit lines -->
+    <path android:strokeColor="#00D4FF" android:strokeWidth="1.5" android:pathData="M30,54 L34,54"/>
+    <path android:strokeColor="#00D4FF" android:strokeWidth="1.5" android:pathData="M74,54 L78,54"/>
+</vector>
