@@ -6,6 +6,7 @@ import android.net.Uri
 import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.google.gson.Gson
 import com.nexbytes.h7skertool.model.CapturedRequest
 import com.nexbytes.h7skertool.model.CapturedResponse
 import com.nexbytes.h7skertool.model.LogEntry
@@ -81,7 +82,6 @@ class CaptureViewModel(app: Application) : AndroidViewModel(app) {
     private val _importResult = MutableStateFlow<String?>(null)
     val importResult: StateFlow<String?> = _importResult.asStateFlow()
 
-    // Channel for batching capture updates to avoid UI lag
     private val captureChannel = Channel<Pair<CapturedRequest, CapturedResponse>>(capacity = Channel.UNLIMITED)
 
     private val http = OkHttpClient.Builder()
@@ -93,6 +93,7 @@ class CaptureViewModel(app: Application) : AndroidViewModel(app) {
         _state.update { it.copy(shizukuPermissionGranted = result == PackageManager.PERMISSION_GRANTED) }
     }
     private var callbacksRegistered = false
+    private val gson = Gson()
 
     init {
         observeSession()
@@ -103,12 +104,10 @@ class CaptureViewModel(app: Application) : AndroidViewModel(app) {
 
     // ── Capture batching ──────────────────────────────────────────────────────
 
-    /** Drain capture channel every 80ms to batch UI updates → smooth list */
     private fun startCaptureConsumer() {
         viewModelScope.launch {
             val batch = mutableListOf<Pair<CapturedRequest, CapturedResponse>>()
             while (true) {
-                // Try to drain up to 20 items with a 80ms window
                 val first = captureChannel.receiveCatching().getOrNull() ?: break
                 batch.add(first)
                 delay(80)
@@ -120,21 +119,14 @@ class CaptureViewModel(app: Application) : AndroidViewModel(app) {
                     val snapshot = batch.toList(); batch.clear()
                     _state.update { s ->
                         var reqs = s.requests
-                        var resps = s.responses.toMutableMap()
+                        var resps = s.responses
                         for ((req, res) in snapshot) {
                             reqs = listOf(req) + reqs
-                            resps[req.id] = res
-                        }
-                        // Keep only last 1000 entries
-                        val entries = resps.entries.toList()
-                        val limited = if (entries.size > 1000) {
-                            entries.takeLast(1000).associate { it.toPair() }
-                        } else {
-                            resps
+                            resps = resps + (req.id to res)
                         }
                         s.copy(
                             requests = reqs.take(1000),
-                            responses = limited
+                            responses = resps.entries.takeLast(1000).associate { it.toPair() }
                         )
                     }
                 }
@@ -213,7 +205,6 @@ class CaptureViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch(Dispatchers.IO) {
             withContext(Dispatchers.Main) { setupCallbacks() }
 
-            // Build active mods map for ProxyServer
             val activeMods = _savedModFiles.value.filter { it.enabled }
             val modsMap = _state.value.savedMods.toMutableMap()
 
@@ -243,11 +234,50 @@ class CaptureViewModel(app: Application) : AndroidViewModel(app) {
     fun setSearch(q: String) { _state.update { it.copy(searchQuery = q) } }
     fun setEndpointFilter(ep: String?) { _state.update { it.copy(endpointFilter = ep) } }
 
+    // ── Helper: Extract only changed fields ──────────────────────────────────
+
+    /**
+     * Extract only the fields that changed between original and modified response.
+     * Returns a map with only the changed fields.
+     */
+    private fun getChangedFields(original: String, modified: String): Map<String, Any> {
+        return try {
+            val originalMap = gson.fromJson(original, Map::class.java) as Map<String, Any>
+            val modifiedMap = gson.fromJson(modified, Map::class.java) as Map<String, Any>
+            
+            val changed = mutableMapOf<String, Any>()
+            for ((key, value) in modifiedMap) {
+                if (originalMap[key] != value) {
+                    changed[key] = value
+                }
+            }
+            Log.d(TAG, "Changed fields: ${changed.keys}")
+            changed
+        } catch (e: Exception) {
+            Log.e(TAG, "getChangedFields error: ${e.message}")
+            // If can't parse, save all fields
+            try {
+                gson.fromJson(modified, Map::class.java) as Map<String, Any>
+            } catch (_: Exception) {
+                emptyMap()
+            }
+        }
+    }
+
+    /**
+     * Get original response body for an endpoint from cache
+     */
+    private fun getOriginalResponseBody(endpoint: String): String? {
+        return _state.value.responses.values
+            .find { it.endpoint == endpoint }
+            ?.bodyText
+    }
+
     // ── Mod management ────────────────────────────────────────────────────────
 
     /**
      * Save a modification from the RequestDetailScreen.
-     * [section]: "headers" | "request" | "response"
+     * ONLY changed fields are saved, not the entire response.
      */
     fun saveModification(endpoint: String, body: String, section: String = "response") {
         viewModelScope.launch {
@@ -256,11 +286,30 @@ class CaptureViewModel(app: Application) : AndroidViewModel(app) {
                 "request"  -> "${endpoint}__req"
                 else       -> "${endpoint}__resp"
             }
-            val mods = _state.value.savedMods.toMutableMap()
-            mods[key] = body
-            _state.update { it.copy(savedMods = mods) }
-            ProxyForegroundService.savedMods = mods
-
+            
+            // ✅ Get original response
+            val originalBody = if (section == "response") {
+                getOriginalResponseBody(endpoint)
+            } else null
+            
+            // ✅ Extract ONLY changed fields
+            val changedFields = if (originalBody != null && section == "response") {
+                getChangedFields(originalBody, body)
+            } else {
+                // For headers/request, save the whole thing (or parse differently)
+                try {
+                    gson.fromJson(body, Map::class.java) as Map<String, Any>
+                } catch (_: Exception) {
+                    mapOf("_raw" to body)
+                }
+            }
+            
+            // ✅ If no changes, don't save
+            if (changedFields.isEmpty()) {
+                log(LogLevel.WARN, "Mod", "No changes detected for $endpoint")
+                return@launch
+            }
+            
             val modName = endpoint.trimStart('/').replace("/", "_").take(40)
                 .ifEmpty { "mod_${System.currentTimeMillis()}" }
             val modType = when (section) {
@@ -268,20 +317,54 @@ class CaptureViewModel(app: Application) : AndroidViewModel(app) {
                 "request"  -> ModType.REQUEST
                 else       -> ModType.RESPONSE
             }
+            
+            // ✅ Save ONLY changed fields as rawContent
+            val modContent = gson.toJson(changedFields)
+            
             withContext(Dispatchers.IO) {
-                ModManager.saveModFromContent(getApplication(), modName, endpoint, body, modType)
+                ModManager.saveModFromContent(
+                    getApplication(), 
+                    modName, 
+                    endpoint, 
+                    modContent,  // ← ONLY changed fields!
+                    modType
+                )
                 refreshModFiles()
             }
-            log(LogLevel.INFO, "Mod", "Saved '$modName' [$section]")
+            
+            // Update proxy
+            val mods = _state.value.savedMods.toMutableMap()
+            mods[key] = modContent
+            _state.update { it.copy(savedMods = mods) }
+            ProxyForegroundService.savedMods = mods
+            
+            log(LogLevel.INFO, "Mod", "Saved '$modName' with ${changedFields.size} field changes [$section]")
         }
     }
 
     /** Called from the FloatingDecodeOverlay when creating a full mod */
     fun saveModFile(name: String, content: String, endpoint: String = "", type: ModType = ModType.RESPONSE) {
         viewModelScope.launch(Dispatchers.IO) {
-            ModManager.saveModFromContent(getApplication(), name, endpoint, content, type)
+            // ✅ If we have original response, extract only changed fields
+            val finalContent = if (endpoint.isNotBlank() && type == ModType.RESPONSE) {
+                val original = getOriginalResponseBody(endpoint)
+                if (original != null) {
+                    val changed = getChangedFields(original, content)
+                    if (changed.isNotEmpty()) {
+                        gson.toJson(changed)
+                    } else {
+                        content
+                    }
+                } else {
+                    content
+                }
+            } else {
+                content
+            }
+            
+            ModManager.saveModFromContent(getApplication(), name, endpoint, finalContent, type)
             refreshModFiles()
-            log(LogLevel.INFO, "ModFile", "Saved: $name")
+            log(LogLevel.INFO, "ModFile", "Saved: $name with changes")
         }
     }
 
@@ -304,7 +387,6 @@ class CaptureViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch(Dispatchers.IO) {
             ModManager.setEnabled(getApplication(), name, enabled)
             refreshModFiles()
-            // If capturing, update active mods in proxy
             if (_state.value.isCapturing) {
                 ProxyForegroundService.activeMods = _savedModFiles.value.filter { it.enabled }
             }
