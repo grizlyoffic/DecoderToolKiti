@@ -119,14 +119,21 @@ class CaptureViewModel(app: Application) : AndroidViewModel(app) {
                     val snapshot = batch.toList(); batch.clear()
                     _state.update { s ->
                         var reqs = s.requests
-                        var resps = s.responses
+                        var resps = s.responses.toMutableMap()
                         for ((req, res) in snapshot) {
                             reqs = listOf(req) + reqs
-                            resps = resps + (req.id to res)
+                            resps[req.id] = res
+                        }
+                        // Keep only last 1000 entries
+                        val entries = resps.entries.toList()
+                        val limited = if (entries.size > 1000) {
+                            entries.takeLast(1000).associate { it.toPair() }
+                        } else {
+                            resps
                         }
                         s.copy(
                             requests = reqs.take(1000),
-                            responses = resps.entries.takeLast(1000).associate { it.toPair() }
+                            responses = limited
                         )
                     }
                 }
@@ -306,7 +313,7 @@ class CaptureViewModel(app: Application) : AndroidViewModel(app) {
             
             // ✅ If no changes, don't save
             if (changedFields.isEmpty()) {
-                log(LogLevel.WARN, "Mod", "No changes detected for $endpoint")
+                log(LogLevel.INFO, "Mod", "No changes detected for $endpoint")
                 return@launch
             }
             
