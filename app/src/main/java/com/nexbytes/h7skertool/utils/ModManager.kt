@@ -29,15 +29,16 @@ data class ModFile(
     val version: Int = 2
 ) {
     /** Build the override map from rules, or fall back to rawContent */
-    fun buildOverrideMap(): Map<String, String> {
+    fun buildOverrideMap(): Map<Int, String> {
         if (rules.isNotEmpty()) {
             return rules
                 .filter { it.action == ModRuleAction.SET.name && it.field.isNotBlank() }
-                .associate { it.field.trim() to it.value }
+                .associate { it.field.trim().toIntOrNull() ?: return@associate null to it.value }
+                .filterKeys { it != null }
+                .mapKeys { it.key!! }
         }
         if (rawContent.isNotBlank()) {
-            // Convert Map<Int, String> to Map<String, String>
-            return ProtoModifier.parseModFields(rawContent).mapKeys { it.key.toString() }
+            return ProtoModifier.parseModFields(rawContent)
         }
         return emptyMap()
     }
@@ -52,7 +53,6 @@ object ModManager {
     const val MODS_DIR_NAME = "mods"
     private val GSON: Gson = GsonBuilder().setPrettyPrinting().create()
 
-    /** Primary: external files/mods/  Fallback: internal files/mods/ */
     fun getModsDir(context: Context): File {
         val ext = try {
             context.getExternalFilesDir(null)?.let { File(it, MODS_DIR_NAME) }
@@ -73,7 +73,6 @@ object ModManager {
         } catch (e: Exception) { Log.e(TAG, "saveMod failed: ${e.message}"); false }
     }
 
-    /** Legacy helper – creates a ModFile from raw JSON content */
     fun saveModFromContent(
         context: Context, name: String, endpoint: String,
         content: String, type: ModType = ModType.RESPONSE
@@ -119,7 +118,6 @@ object ModManager {
         } catch (e: Exception) { Log.e(TAG, "setEnabled: ${e.message}"); false }
     }
 
-    /** Export a mod file to the Downloads-like external dir, returns the file */
     fun exportMod(context: Context, mod: ModFile): File? {
         return try {
             val dir = context.getExternalFilesDir("ModExports")
@@ -131,7 +129,6 @@ object ModManager {
         } catch (e: Exception) { Log.e(TAG, "exportMod: ${e.message}"); null }
     }
 
-    /** Import a mod from a Uri (file picker result) */
     fun importMod(context: Context, uri: Uri): ModFile? {
         return try {
             val text = context.contentResolver.openInputStream(uri)
