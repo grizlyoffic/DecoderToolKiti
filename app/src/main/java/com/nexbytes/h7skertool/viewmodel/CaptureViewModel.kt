@@ -257,7 +257,6 @@ class CaptureViewModel(app: Application) : AndroidViewModel(app) {
             val changed = mutableMapOf<String, Any>()
             for ((key, value) in modifiedMap) {
                 if (originalMap[key] != value) {
-                    // ✅ Clean the value - convert numbers to proper format
                     val cleanedValue = cleanValue(value)
                     changed[key] = cleanedValue
                 }
@@ -277,7 +276,7 @@ class CaptureViewModel(app: Application) : AndroidViewModel(app) {
         return when (value) {
             is Double -> {
                 if (value % 1.0 == 0.0) {
-                    value.toLong()  // 1.0 → 1, 9999999999.0 → 9999999999
+                    value.toLong()
                 } else {
                     value
                 }
@@ -285,12 +284,20 @@ class CaptureViewModel(app: Application) : AndroidViewModel(app) {
             is Map<*, *> -> {
                 val cleaned = mutableMapOf<String, Any>()
                 for ((k, v) in value) {
-                    cleaned[k.toString()] = cleanValue(v ?: continue)
+                    if (v != null) {
+                        cleaned[k.toString()] = cleanValue(v)
+                    }
                 }
                 cleaned
             }
             is List<*> -> {
-                value.map { cleanValue(it ?: continue) }
+                val cleaned = mutableListOf<Any>()
+                for (item in value) {
+                    if (item != null) {
+                        cleaned.add(cleanValue(item))
+                    }
+                }
+                cleaned
             }
             else -> value
         }
@@ -318,16 +325,13 @@ class CaptureViewModel(app: Application) : AndroidViewModel(app) {
                 else       -> "${endpoint}__resp"
             }
             
-            // ✅ Get original response
             val originalBody = if (section == "response") {
                 getOriginalResponseBody(endpoint)
             } else null
             
-            // ✅ Extract ONLY changed fields
             val changedFields = if (originalBody != null && section == "response") {
                 getChangedFields(originalBody, body)
             } else {
-                // For headers/request, save as-is
                 try {
                     val map = gson.fromJson(body, Map::class.java) as Map<String, Any>
                     map.mapValues { cleanValue(it.value) }
@@ -336,7 +340,6 @@ class CaptureViewModel(app: Application) : AndroidViewModel(app) {
                 }
             }
             
-            // ✅ If no changes, don't save
             if (changedFields.isEmpty()) {
                 log(LogLevel.INFO, "Mod", "No changes detected for $endpoint")
                 return@launch
@@ -350,7 +353,6 @@ class CaptureViewModel(app: Application) : AndroidViewModel(app) {
                 else       -> ModType.RESPONSE
             }
             
-            // ✅ Save ONLY changed fields
             val modContent = gson.toJson(changedFields)
             
             withContext(Dispatchers.IO) {
@@ -364,7 +366,6 @@ class CaptureViewModel(app: Application) : AndroidViewModel(app) {
                 refreshModFiles()
             }
             
-            // Update proxy
             val mods = _state.value.savedMods.toMutableMap()
             mods[key] = modContent
             _state.update { it.copy(savedMods = mods) }
@@ -377,7 +378,6 @@ class CaptureViewModel(app: Application) : AndroidViewModel(app) {
     /** Called from the FloatingDecodeOverlay when creating a full mod */
     fun saveModFile(name: String, content: String, endpoint: String = "", type: ModType = ModType.RESPONSE) {
         viewModelScope.launch(Dispatchers.IO) {
-            // ✅ If we have original response, extract only changed fields
             val finalContent = if (endpoint.isNotBlank() && type == ModType.RESPONSE) {
                 val original = getOriginalResponseBody(endpoint)
                 if (original != null) {
