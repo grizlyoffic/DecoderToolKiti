@@ -94,9 +94,7 @@ class CaptureViewModel(app: Application) : AndroidViewModel(app) {
         _state.update { it.copy(shizukuPermissionGranted = result == PackageManager.PERMISSION_GRANTED) }
     }
     private var callbacksRegistered = false
-    private val gson = GsonBuilder()
-        .setLenient()
-        .create()
+    private val gson = GsonBuilder().setLenient().create()
 
     init {
         observeSession()
@@ -245,10 +243,6 @@ class CaptureViewModel(app: Application) : AndroidViewModel(app) {
 
     // ── Helper: Extract ONLY changed fields ──────────────────────────────────
 
-    /**
-     * Extract only the fields that changed between original and modified response.
-     * Converts numbers properly (no scientific notation, no .0)
-     */
     private fun getChangedFields(original: String, modified: String): Map<String, Any> {
         return try {
             val originalMap = gson.fromJson(original, Map::class.java) as Map<String, Any>
@@ -257,8 +251,7 @@ class CaptureViewModel(app: Application) : AndroidViewModel(app) {
             val changed = mutableMapOf<String, Any>()
             for ((key, value) in modifiedMap) {
                 if (originalMap[key] != value) {
-                    val cleanedValue = cleanValue(value)
-                    changed[key] = cleanedValue
+                    changed[key] = cleanValue(value)
                 }
             }
             Log.d(TAG, "Changed fields: ${changed.keys}")
@@ -269,33 +262,22 @@ class CaptureViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    /**
-     * Clean value: Convert Double to Long if it's a whole number
-     */
     private fun cleanValue(value: Any): Any {
         return when (value) {
             is Double -> {
-                if (value % 1.0 == 0.0) {
-                    value.toLong()
-                } else {
-                    value
-                }
+                if (value % 1.0 == 0.0) value.toLong() else value
             }
             is Map<*, *> -> {
                 val cleaned = mutableMapOf<String, Any>()
                 for ((k, v) in value) {
-                    if (v != null) {
-                        cleaned[k.toString()] = cleanValue(v)
-                    }
+                    if (v != null) cleaned[k.toString()] = cleanValue(v)
                 }
                 cleaned
             }
             is List<*> -> {
                 val cleaned = mutableListOf<Any>()
                 for (item in value) {
-                    if (item != null) {
-                        cleaned.add(cleanValue(item))
-                    }
+                    if (item != null) cleaned.add(cleanValue(item))
                 }
                 cleaned
             }
@@ -303,13 +285,8 @@ class CaptureViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    /**
-     * Get original response body for an endpoint from cache
-     */
     private fun getOriginalResponseBody(endpoint: String): String? {
-        return _state.value.responses.values
-            .find { it.endpoint == endpoint }
-            ?.bodyText
+        return _state.value.responses.values.find { it.endpoint == endpoint }?.bodyText
     }
 
     // ── Mod management ────────────────────────────────────────────────────────
@@ -320,15 +297,13 @@ class CaptureViewModel(app: Application) : AndroidViewModel(app) {
     fun saveModification(endpoint: String, body: String, section: String = "response") {
         viewModelScope.launch {
             val key = when (section) {
-                "headers"  -> "${endpoint}__headers"
-                "request"  -> "${endpoint}__req"
-                else       -> "${endpoint}__resp"
+                "headers" -> "${endpoint}__headers"
+                "request" -> "${endpoint}__req"
+                else -> "${endpoint}__resp"
             }
-            
-            val originalBody = if (section == "response") {
-                getOriginalResponseBody(endpoint)
-            } else null
-            
+
+            val originalBody = if (section == "response") getOriginalResponseBody(endpoint) else null
+
             val changedFields = if (originalBody != null && section == "response") {
                 getChangedFields(originalBody, body)
             } else {
@@ -339,64 +314,59 @@ class CaptureViewModel(app: Application) : AndroidViewModel(app) {
                     mapOf("_raw" to body)
                 }
             }
-            
+
             if (changedFields.isEmpty()) {
                 log(LogLevel.INFO, "Mod", "No changes detected for $endpoint")
                 return@launch
             }
-            
+
             val modName = endpoint.trimStart('/').replace("/", "_").take(40)
                 .ifEmpty { "mod_${System.currentTimeMillis()}" }
             val modType = when (section) {
-                "headers"  -> ModType.HEADER
-                "request"  -> ModType.REQUEST
-                else       -> ModType.RESPONSE
+                "headers" -> ModType.HEADER
+                "request" -> ModType.REQUEST
+                else -> ModType.RESPONSE
             }
-            
+
             val modContent = gson.toJson(changedFields)
-            
+
             withContext(Dispatchers.IO) {
                 ModManager.saveModFromContent(
-                    getApplication(), 
-                    modName, 
-                    endpoint, 
+                    getApplication(),
+                    modName,
+                    endpoint,
                     modContent,
                     modType
                 )
                 refreshModFiles()
             }
-            
+
             val mods = _state.value.savedMods.toMutableMap()
             mods[key] = modContent
             _state.update { it.copy(savedMods = mods) }
             ProxyForegroundService.savedMods = mods
-            
+
             log(LogLevel.INFO, "Mod", "Saved '$modName' with ${changedFields.size} field changes [$section]")
         }
     }
 
-    /** Called from the FloatingDecodeOverlay when creating a full mod */
     fun saveModFile(name: String, content: String, endpoint: String = "", type: ModType = ModType.RESPONSE) {
         viewModelScope.launch(Dispatchers.IO) {
             val finalContent = if (endpoint.isNotBlank() && type == ModType.RESPONSE) {
                 val original = getOriginalResponseBody(endpoint)
                 if (original != null) {
                     val changed = getChangedFields(original, content)
-                    if (changed.isNotEmpty()) {
-                        gson.toJson(changed)
-                    } else {
-                        content
-                    }
+                    if (changed.isNotEmpty()) gson.toJson(changed) else content
                 } else {
                     content
                 }
             } else {
                 content
             }
-            
+
             ModManager.saveModFromContent(getApplication(), name, endpoint, finalContent, type)
             refreshModFiles()
-            log(LogLevel.INFO, "ModFile", "Saved: $name with changes")
+            log(LogLevel.INFO, "ModFile", "Saved: $name")
         }
     }
 
@@ -425,8 +395,7 @@ class CaptureViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun exportMod(mod: ModFile): File? =
-        ModManager.exportMod(getApplication(), mod)
+    fun exportMod(mod: ModFile): File? = ModManager.exportMod(getApplication(), mod)
 
     fun importMod(uri: Uri) {
         viewModelScope.launch(Dispatchers.IO) {
