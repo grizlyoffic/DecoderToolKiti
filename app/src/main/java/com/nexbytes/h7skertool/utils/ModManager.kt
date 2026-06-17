@@ -31,11 +31,16 @@ data class ModFile(
     /** Build the override map from rules, or fall back to rawContent */
     fun buildOverrideMap(): Map<Int, String> {
         if (rules.isNotEmpty()) {
-            return rules
-                .filter { it.action == ModRuleAction.SET.name && it.field.isNotBlank() }
-                .associate { it.field.trim().toIntOrNull() ?: return@associate null to it.value }
-                .filterKeys { it != null }
-                .mapKeys { it.key!! }
+            val result = mutableMapOf<Int, String>()
+            for (rule in rules) {
+                if (rule.action == ModRuleAction.SET.name && rule.field.isNotBlank()) {
+                    val fieldNum = rule.field.trim().toIntOrNull()
+                    if (fieldNum != null) {
+                        result[fieldNum] = rule.value
+                    }
+                }
+            }
+            return result
         }
         if (rawContent.isNotBlank()) {
             return ProtoModifier.parseModFields(rawContent)
