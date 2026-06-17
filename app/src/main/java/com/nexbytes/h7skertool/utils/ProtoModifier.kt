@@ -4,7 +4,6 @@ import android.util.Log
 import com.google.gson.Gson
 import com.google.gson.JsonParser
 
-/** Represents a single protobuf field parsed from raw bytes */
 data class ProtoField(
     val fieldNum: Int,
     val wireType: Int,
@@ -16,8 +15,6 @@ data class ProtoField(
 object ProtoModifier {
     private const val TAG = "ProtoModifier"
     private val gson = Gson()
-
-    // ── Varint codec ─────────────────────────────────────────────────────────
 
     fun encodeVarint(value: Long): ByteArray {
         val out = mutableListOf<Byte>()
@@ -44,8 +41,6 @@ object ProtoModifier {
         }
         return Pair(value, i)
     }
-
-    // ── Parse protobuf bytes → UI field list ─────────────────────────────────
 
     fun parseFields(data: ByteArray): List<ProtoField> {
         val result = mutableListOf<ProtoField>()
@@ -112,11 +107,6 @@ object ProtoModifier {
 
     private data class Quad(val a: String, val b: String, val c: Int, val d: String)
 
-    // ── Convert JSON value to protobuf bytes ──────────────────────────────
-
-    /**
-     * Convert any JSON value (string, number, array, object) to protobuf bytes
-     */
     private fun jsonValueToProtoBytes(
         jsonValue: String,
         wireType: Int,
@@ -125,7 +115,6 @@ object ProtoModifier {
         return try {
             val trimmed = jsonValue.trim()
             when {
-                // Array - REPEATED FIELDS
                 trimmed.startsWith("[") -> {
                     val array = JsonParser.parseString(trimmed).asJsonArray
                     val out = mutableListOf<Byte>()
@@ -145,7 +134,6 @@ object ProtoModifier {
                     }
                     out.toByteArray()
                 }
-                // Object - NESTED MESSAGE
                 trimmed.startsWith("{") -> {
                     val obj = JsonParser.parseString(trimmed).asJsonObject
                     val out = mutableListOf<Byte>()
@@ -187,13 +175,11 @@ object ProtoModifier {
                     }
                     out.toByteArray()
                 }
-                // String with quotes
                 trimmed.startsWith("\"") && trimmed.endsWith("\"") -> {
                     val str = trimmed.substring(1, trimmed.length - 1)
                     val strBytes = str.toByteArray(Charsets.UTF_8)
                     encodeVarint(strBytes.size.toLong()) + strBytes
                 }
-                // Number
                 trimmed.toLongOrNull() != null -> {
                     val value = trimmed.toLong()
                     when (wireType) {
@@ -211,10 +197,8 @@ object ProtoModifier {
                         else -> encodeVarint(value)
                     }
                 }
-                // Boolean
                 trimmed.equals("true", ignoreCase = true) -> encodeVarint(1L)
                 trimmed.equals("false", ignoreCase = true) -> encodeVarint(0L)
-                // Default: treat as string
                 else -> {
                     val strBytes = trimmed.toByteArray(Charsets.UTF_8)
                     encodeVarint(strBytes.size.toLong()) + strBytes
@@ -226,51 +210,41 @@ object ProtoModifier {
         }
     }
 
-    // ── Apply field overrides – ONLY changed fields ──────────────────────────
-
-    /**
-     * Rebuilds protobuf bytes, applying [modFields] (fieldNum → newValue).
-     * ONLY fields in modFields are changed. All other fields are copied VERBATIM.
-     * This preserves the original structure completely.
-     */
     fun modifyProtoBytes(data: ByteArray, modFields: Map<Int, String>): ByteArray {
         if (data.isEmpty() || modFields.isEmpty()) return data
-        
+
         return try {
             val out = mutableListOf<Byte>()
             var i = 0
-            
+
             while (i < data.size) {
                 val startI = i
                 val (tag, afterTag) = readVarint(data, i)
                 if (tag == 0L) break
-                
+
                 val fieldNumber = (tag shr 3).toInt()
                 if (fieldNumber <= 0) {
                     out.addAll(data.slice(i until data.size))
                     break
                 }
-                
+
                 val wireType = (tag and 0x07).toInt()
                 val tagBytes = encodeVarint(tag)
-                
-                // ✅ ONLY change if field is in modFields
+
                 val modValue = if (fieldNumber in modFields) {
                     modFields[fieldNumber]
                 } else {
-                    null  // ← Field not changed, copy original
+                    null
                 }
 
                 when (wireType) {
                     0 -> {
                         val (orig, end) = readVarint(data, afterTag)
                         if (modValue != null) {
-                            // Changed field - use new value
                             val nv = modValue.trim().toLongOrNull() ?: orig
                             out.addAll(tagBytes.toList())
                             out.addAll(encodeVarint(nv).toList())
                         } else {
-                            // ✅ Unchanged field - copy original verbatim
                             out.addAll(data.slice(startI until end))
                         }
                         i = end
@@ -281,7 +255,6 @@ object ProtoModifier {
                             break
                         }
                         if (modValue != null) {
-                            // Changed field - use new value
                             out.addAll(tagBytes.toList())
                             val b = ByteArray(8)
                             val nv = modValue.trim().toLongOrNull()
@@ -292,7 +265,6 @@ object ProtoModifier {
                             }
                             out.addAll(b.toList())
                         } else {
-                            // ✅ Unchanged field - copy original verbatim
                             out.addAll(data.slice(startI until afterTag + 8))
                         }
                         i = afterTag + 8
@@ -305,19 +277,16 @@ object ProtoModifier {
                             out.addAll(data.slice(i until data.size))
                             break
                         }
-                        
+
                         if (modValue != null) {
-                            // Changed field - convert and encode new value
                             out.addAll(tagBytes.toList())
                             val trimmed = modValue.trim()
                             if (trimmed.startsWith("[") || trimmed.startsWith("{")) {
-                                // Complex JSON → convert to protobuf bytes
                                 val newBytes = jsonValueToProtoBytes(modValue, wireType, fieldNumber)
                                 if (newBytes != null) {
                                     out.addAll(encodeVarint(newBytes.size.toLong()).toList())
                                     out.addAll(newBytes.toList())
                                 } else {
-                                    // Fallback: treat as string
                                     val stripped = modValue.let {
                                         if (it.length >= 2 && it.startsWith("\"") && it.endsWith("\""))
                                             it.substring(1, it.length - 1)
@@ -328,7 +297,6 @@ object ProtoModifier {
                                     out.addAll(nb.toList())
                                 }
                             } else {
-                                // Simple string or number
                                 val stripped = modValue.let {
                                     if (it.length >= 2 && it.startsWith("\"") && it.endsWith("\""))
                                         it.substring(1, it.length - 1)
@@ -339,7 +307,6 @@ object ProtoModifier {
                                 out.addAll(nb.toList())
                             }
                         } else {
-                            // ✅ Unchanged field - copy original verbatim
                             out.addAll(data.slice(startI until end2))
                         }
                         i = end2
@@ -350,7 +317,6 @@ object ProtoModifier {
                             break
                         }
                         if (modValue != null) {
-                            // Changed field - use new value
                             out.addAll(tagBytes.toList())
                             val nv = modValue.trim().toLongOrNull()
                             val b = ByteArray(4)
@@ -361,13 +327,11 @@ object ProtoModifier {
                             }
                             out.addAll(b.toList())
                         } else {
-                            // ✅ Unchanged field - copy original verbatim
                             out.addAll(data.slice(startI until afterTag + 4))
                         }
                         i = afterTag + 4
                     }
                     else -> {
-                        // Unknown wire type → copy rest verbatim
                         Log.w(TAG, "Unknown wire type $wireType at field $fieldNumber – preserving tail")
                         out.addAll(data.slice(i until data.size))
                         break
@@ -381,9 +345,6 @@ object ProtoModifier {
         }
     }
 
-    /**
-     * Parse a JSON-like mod map from string.
-     */
     fun parseModFields(modJson: String): Map<Int, String> {
         val result = mutableMapOf<Int, String>()
         if (modJson.isBlank()) return result
@@ -404,9 +365,6 @@ object ProtoModifier {
         }
     }
 
-    /**
-     * Convert decoded JSON map back to protobuf bytes.
-     */
     fun jsonToProtoBytes(json: String, originalBytes: ByteArray): ByteArray? {
         return try {
             val modFields = parseModFields(json)
