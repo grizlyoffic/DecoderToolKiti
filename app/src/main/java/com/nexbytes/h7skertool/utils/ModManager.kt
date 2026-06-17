@@ -36,7 +36,8 @@ data class ModFile(
                 .associate { it.field.trim() to it.value }
         }
         if (rawContent.isNotBlank()) {
-            return ProtoModifier.parseModFields(rawContent)
+            // Convert Map<Int, String> to Map<String, String>
+            return ProtoModifier.parseModFields(rawContent).mapKeys { it.key.toString() }
         }
         return emptyMap()
     }
